@@ -4,6 +4,7 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+import math
 
 from ultralytics.utils.torch_utils import fuse_conv_and_bn
 
@@ -1594,39 +1595,123 @@ class SCDown(nn.Module):
 """
 KAN Block
 """
+#
+#
+# class C2f_KAN_1D(nn.Module):
+#     """Faster Implementation of CSP Bottleneck with KAN-enhanced convolutions."""
+#
+#     def __init__(self, c1, c2, n=1, shortcut=False, g=1, e=0.5):
+#         """Initializes a CSP bottleneck with KAN convolutions and n Bottleneck blocks for faster processing."""
+#         super().__init__()
+#         self.c = int(c2 * e)  # hidden channels
+#         self.cv1 = Conv(c1, 2 * self.c, 1, 1)
+#         self.flatten = FlattenLayer(patch_size=7, stride=1, in_chans=self.c, embed_dim=self.c)  # 添加 FlattenLayer
+#         self.cv2 = Conv((2 + n) * self.c, c2, 1)  # optional act=FReLU(c2)
+#         self.m = nn.ModuleList(
+#             Bottleneck_KAN_1D(self.c, self.c, shortcut, g, k=((3, 3), (3, 3)), e=1.0) for _ in range(n))
+#
+#     def forward(self, x):
+#         """Forward pass through C2f_KAN_1D layer."""
+#         y = list(self.cv1(x).chunk(2, 1))
+#
+#         # Apply flattening before passing to Bottleneck_KAN_1D
+#         flattened_y, H, W = self.flatten(y[-1])
+#
+#         y.extend(m(y[-1]) for m in self.m)  # Pass flattened_y through each Bottleneck_KAN_1D layer
+#         return self.cv2(torch.cat(y, 1))
+#
+#     def forward_split(self, x):
+#         """Forward pass using split() instead of chunk()."""
+#         y = list(self.cv1(x).split((self.c, self.c), 1))
+#
+#         # Apply flattening before passing to Bottleneck_KAN_1D
+#         flattened_y, H, W = self.flatten(y[-1])
+#
+#         y.extend(m(flattened_y, H, W) for m in self.m)
+#         return self.cv2(torch.cat(y, 1))
+#
+#
+# class Bottleneck_KAN_1D(nn.Module):
+#     def __init__(self, c1, c2, shortcut=True, g=1, k=(3, 3), e=0.5):
+#         super().__init__()
+#         c_ = int(c2 * e)  # hidden channels
+#         self.cv1 = KAN_Block(c1, c_, k[0])
+#         self.cv2 = KAN_Block(c_, c2, k[1])
+#         self.add = shortcut and c1 == c2
+#
+#     def forward(self, x):
+#         """Applies the YOLO FPN to input data."""
+#         return x + self.cv2(self.cv1(x)) if self.add else self.cv2(self.cv1(x))
+#
+# class FlattenLayer(nn.Module):
+#     """Image to Patch Embedding with 3x3 convolution to flatten input for KAN_Block."""
+#
+#     def __init__(self, patch_size=3, stride=1, in_chans=3, embed_dim=768):
+#         super().__init__()
+#         self.proj = nn.Conv2d(in_chans, embed_dim, kernel_size=patch_size, stride=stride,
+#                               padding=(patch_size // 2))
+#         self.norm = nn.LayerNorm(embed_dim)
+#
+#     def forward(self, x):
+#         x = self.proj(x)
+#         _, _, H, W = x.shape
+#         x = x.flatten(2).transpose(1, 2)  # Flatten to (B, N, C) for KAN_Block compatibility
+#         x = self.norm(x)
+#         return x, H, W
+#
+# class KAN_Block(nn.Module):
+#     """KAN Block with KANLayer, DWConv, BatchNorm, and SiLU activation."""
+#
+#     def __init__(self, c1, c2, k=3):
+#         super(KAN_Block, self).__init__()
+#         # KANLayer: c1 to c2 transformation
+#         self.kanlayer = KAN([c1, c2], grid_size=4, spline_order=3, scale_noise=0.1)  # Customizable KAN params
+#         # Depthwise Convolution
+#         self.dwconv = nn.Conv2d(c2, c2, kernel_size=k, stride=1, padding=1, groups=c2)
+#         # Batch Normalization and Activation
+#         self.bn = nn.BatchNorm2d(c2)
+#         self.act = nn.SiLU()
+#
+#     def forward(self, x):
+#         B, C, H, W = x.shape  # 获取输入张量的形状
+#         x = x.permute(0, 2, 3, 1).reshape(-1, C)  # 变形为 [B * H * W, C]
+#         x = self.kanlayer(x)  # 现在 x 的形状是 [B * H * W, c2]
+#
+#         # 将 x 重新变形回 [B, c2, H, W]
+#         x = x.view(B, H, W, -1).permute(0, 3, 1, 2)
+#
+#         x = self.dwconv(x)
+#         x = self.bn(x)
+#         x = self.act(x)
+#         return x
+
 
 
 class C2f_KAN_1D(nn.Module):
     """Faster Implementation of CSP Bottleneck with KAN-enhanced convolutions."""
 
     def __init__(self, c1, c2, n=1, shortcut=False, g=1, e=0.5):
-        """Initializes a CSP bottleneck with KAN convolutions and n Bottleneck blocks for faster processing."""
         super().__init__()
         self.c = int(c2 * e)  # hidden channels
         self.cv1 = Conv(c1, 2 * self.c, 1, 1)
-        self.flatten = FlattenLayer(patch_size=7, stride=1, in_chans=self.c, embed_dim=self.c)  # 添加 FlattenLayer
+        self.flatten = FlattenLayer(patch_size=7, stride=1, in_chans=self.c, embed_dim=self.c)
         self.cv2 = Conv((2 + n) * self.c, c2, 1)  # optional act=FReLU(c2)
         self.m = nn.ModuleList(
-            Bottleneck_KAN_1D(self.c, self.c, shortcut, g, k=((3, 3), (3, 3)), e=1.0) for _ in range(n))
+            Bottleneck_KAN_1D(self.c, self.c, shortcut, g, k=(3, 3), e=1.0) for _ in range(n)
+        )
 
     def forward(self, x):
-        """Forward pass through C2f_KAN_1D layer."""
-        y = list(self.cv1(x).chunk(2, 1))
+        y = list(self.cv1(x).chunk(2, 1))  # 分成两部分
 
-        # Apply flattening before passing to Bottleneck_KAN_1D
-        flattened_y, H, W = self.flatten(y[-1])
+        # 对 y[-1] 应用 flatten，但随后立即将其变回 [B, C, H, W]
+        flattened_y, H, W = self.flatten(y[-1])  # 形状：[B, N, embed_dim]
+        x = flattened_y.transpose(1, 2).view(-1, self.c, H, W)  # 形状：[B, C, H, W]
 
-        y.extend(m(y[-1]) for m in self.m)  # Pass flattened_y through each Bottleneck_KAN_1D layer
-        return self.cv2(torch.cat(y, 1))
+        # 通过每个 Bottleneck_KAN_1D 层
+        for m in self.m:
+            x = m(x)  # x 形状：[B, c2, H, W]
 
-    def forward_split(self, x):
-        """Forward pass using split() instead of chunk()."""
-        y = list(self.cv1(x).split((self.c, self.c), 1))
-
-        # Apply flattening before passing to Bottleneck_KAN_1D
-        flattened_y, H, W = self.flatten(y[-1])
-
-        y.extend(m(flattened_y, H, W) for m in self.m)
+        y.append(x)
         return self.cv2(torch.cat(y, 1))
 
 
@@ -1639,22 +1724,38 @@ class Bottleneck_KAN_1D(nn.Module):
         self.add = shortcut and c1 == c2
 
     def forward(self, x):
-        """Applies the YOLO FPN to input data."""
-        return x + self.cv2(self.cv1(x)) if self.add else self.cv2(self.cv1(x))
+        out = self.cv1(x)
+        out = self.cv2(out)
+        return x + out if self.add else out
+
 
 class FlattenLayer(nn.Module):
     """Image to Patch Embedding with 3x3 convolution to flatten input for KAN_Block."""
 
-    def __init__(self, patch_size=3, stride=1, in_chans=3, embed_dim=768):
+    def __init__(self, patch_size=7, stride=4, in_chans=3, embed_dim=768):
         super().__init__()
         self.proj = nn.Conv2d(in_chans, embed_dim, kernel_size=patch_size, stride=stride,
-                              padding=(patch_size // 2))
+                              padding=patch_size // 2)
         self.norm = nn.LayerNorm(embed_dim)
 
+        # Initialize weights (optional, based on PatchEmbed)
+        self.apply(self._init_weights)
+
+    def _init_weights(self, m):
+        if isinstance(m, nn.Conv2d):
+            fan_out = m.kernel_size[0] * m.kernel_size[1] * m.out_channels
+            fan_out //= m.groups
+            m.weight.data.normal_(0, math.sqrt(2.0 / fan_out))
+            if m.bias is not None:
+                m.bias.data.zero_()
+        elif isinstance(m, nn.LayerNorm):
+            nn.init.constant_(m.bias, 0)
+            nn.init.constant_(m.weight, 1.0)
+
     def forward(self, x):
-        x = self.proj(x)
+        x = self.proj(x)  # Shape: [B, embed_dim, H, W]
         _, _, H, W = x.shape
-        x = x.flatten(2).transpose(1, 2)  # Flatten to (B, N, C) for KAN_Block compatibility
+        x = x.flatten(2).transpose(1, 2)  # Shape: [B, N, embed_dim], N = H * W
         x = self.norm(x)
         return x, H, W
 
@@ -1664,21 +1765,19 @@ class KAN_Block(nn.Module):
     def __init__(self, c1, c2, k=3):
         super(KAN_Block, self).__init__()
         # KANLayer: c1 to c2 transformation
-        self.kanlayer = KAN([c1, c2], grid_size=4, spline_order=3, scale_noise=0.1)  # Customizable KAN params
+        self.kanlayer = KAN([c1, c2], grid_size=4, spline_order=3, scale_noise=0.1)
         # Depthwise Convolution
-        self.dwconv = nn.Conv2d(c2, c2, kernel_size=k, stride=1, padding=1, groups=c2)
+        self.dwconv = nn.Conv2d(c2, c2, kernel_size=k, stride=1, padding=k // 2, groups=c2)
         # Batch Normalization and Activation
         self.bn = nn.BatchNorm2d(c2)
         self.act = nn.SiLU()
 
     def forward(self, x):
-        B, C, H, W = x.shape  # 获取输入张量的形状
-        x = x.permute(0, 2, 3, 1).reshape(-1, C)  # 变形为 [B * H * W, C]
-        x = self.kanlayer(x)  # 现在 x 的形状是 [B * H * W, c2]
-
-        # 将 x 重新变形回 [B, c2, H, W]
-        x = x.view(B, H, W, -1).permute(0, 3, 1, 2)
-
+        # x 是形状 [B, C, H, W]
+        B, C, H, W = x.shape
+        x = x.permute(0, 2, 3, 1).reshape(-1, C)  # 形状：[B * H * W, C]
+        x = self.kanlayer(x)  # 形状：[B * H * W, c2]
+        x = x.view(B, H, W, -1).permute(0, 3, 1, 2)  # 形状：[B, c2, H, W]
         x = self.dwconv(x)
         x = self.bn(x)
         x = self.act(x)
