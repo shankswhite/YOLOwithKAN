@@ -502,6 +502,7 @@ class KANLinear(torch.nn.Module):
             self.scaled_spline_weight.view(self.out_features, -1),
         )
         output = base_output + spline_output
+        output = torch.sigmoid(output)
 
         output = output.reshape(*original_shape[:-1], self.out_features)
         return output
