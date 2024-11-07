@@ -52,7 +52,8 @@ __all__ = (
     "PSA",
     "SCDown",
     'C3_KAN',
-    'C2f_KAN'
+    'C2f_KAN',
+    'KAN_Block'
 )
 
 

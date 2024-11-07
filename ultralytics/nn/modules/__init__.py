@@ -44,6 +44,7 @@ from .block import (
     C3k2,
     C3_KAN,
     C2f_KAN_1D,
+    KAN_Block,
     C3x,
     CBFuse,
     CBLinear,
@@ -160,5 +161,6 @@ __all__ = (
     "C2fCIB",
     "Attention",
     "PSA",
+    "KAN_Block",
 )
 
