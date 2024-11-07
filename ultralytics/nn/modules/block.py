@@ -1760,25 +1760,33 @@ class FlattenLayer(nn.Module):
         return x, H, W
 
 class KAN_Block(nn.Module):
-    """KAN Block with KANLayer, DWConv, BatchNorm, and SiLU activation."""
+    """KAN Block with KANLayer, DWConv, BatchNorm, and customizable activation and convolution parameters."""
 
-    def __init__(self, c1, c2, k=3):
+    def __init__(self, c1, c2, k=3, s=1, p=None, g=1, d=1, act=True):
         super(KAN_Block, self).__init__()
-        # KANLayer: c1 to c2 transformation
+        # KANLayer: c1 to c2 transformation, note that KAN here is flexible with output channels
         self.kanlayer = KAN([c1, c2], grid_size=4, spline_order=3, scale_noise=0.1)
-        # Depthwise Convolution
-        self.dwconv = nn.Conv2d(c2, c2, kernel_size=k, stride=1, padding=k // 2, groups=c2)
-        # Batch Normalization and Activation
+
+        # Depthwise Convolution with adjustable kernel, stride, padding, groups, and dilation
+        self.dwconv = nn.Conv2d(c2, c2, kernel_size=k, stride=s, padding=autopad(k, p, d), groups=g, dilation=d)
+
+        # Batch Normalization
         self.bn = nn.BatchNorm2d(c2)
-        self.act = nn.SiLU()
+
+        # Activation Function
+        self.act = nn.SiLU() if act is True else act if isinstance(act, nn.Module) else nn.Identity()
 
     def forward(self, x):
-        # x 是形状 [B, C, H, W]
+        # x is in the shape [B, C, H, W]
         B, C, H, W = x.shape
-        x = x.permute(0, 2, 3, 1).reshape(-1, C)  # 形状：[B * H * W, C]
-        x = self.kanlayer(x)  # 形状：[B * H * W, c2]
-        x = x.view(B, H, W, -1).permute(0, 3, 1, 2)  # 形状：[B, c2, H, W]
-        x = self.dwconv(x)
-        x = self.bn(x)
-        x = self.act(x)
+
+        # Flatten for KAN layer processing
+        x = x.permute(0, 2, 3, 1).reshape(-1, C)  # Shape: [B * H * W, C]
+        x = self.kanlayer(x)  # Shape after KAN: [B * H * W, c2]
+
+        # Reshape back to [B, c2, H, W] after KAN processing
+        x = x.view(B, H, W, -1).permute(0, 3, 1, 2)
+
+        # Apply depthwise convolution, batch normalization, and activation
+        x = self.act(self.bn(self.dwconv(x)))
         return x
