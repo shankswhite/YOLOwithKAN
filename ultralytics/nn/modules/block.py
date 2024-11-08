@@ -1838,6 +1838,35 @@ class Bottleneck_KAN_1D(nn.Module):
         return x + out if self.add else out
 
 
+class DepthwiseFlattenLayer(nn.Module):
+    def __init__(self, in_chans, embed_dim):
+        super().__init__()
+        self.proj = nn.Conv2d(in_chans, embed_dim, kernel_size=1, groups=in_chans)  # 使用groups=in_chans的深度卷积
+        self.norm = nn.LayerNorm(embed_dim)
+
+    def forward(self, x):
+        x = self.proj(x)  # [B, embed_dim, H, W]
+        _, _, H, W = x.shape
+        x = x.flatten(2).transpose(1, 2)  # [B, N, embed_dim], N = H * W
+        x = self.norm(x)
+        return x, H, W
+
+
+class AvgPoolFlattenLayer(nn.Module):
+    def __init__(self, in_chans, embed_dim):
+        super().__init__()
+        self.pool = nn.AdaptiveAvgPool2d((4, 4))  # 设定一个较小的分辨率，比如 4x4
+        self.fc = nn.Linear(in_chans * 4 * 4, embed_dim)
+        self.norm = nn.LayerNorm(embed_dim)
+
+    def forward(self, x):
+        x = self.pool(x)  # [B, in_chans, 4, 4]
+        x = x.flatten(1)  # [B, in_chans * 4 * 4]
+        x = self.fc(x)  # [B, embed_dim]
+        x = self.norm(x)
+        return x
+
+
 class FlattenLayer(nn.Module):
     """Image to Patch Embedding with 3x3 convolution to flatten input for KAN_Block."""
 
@@ -1916,7 +1945,8 @@ class C3_KAN(nn.Module):
         self.cv1 = Conv(c1, self.c_, 1, 1)
         self.cv2 = Conv(c1, self.c_, 1, 1)
         self.cv3 = Conv(2 * self.c_, c2, 1)  # optional act=FReLU(c2)
-        self.flatten = FlattenLayer(patch_size=7, stride=1, in_chans=self.c_, embed_dim=self.c_)
+        # self.flatten = FlattenLayer(patch_size=7, stride=1, in_chans=self.c_, embed_dim=self.c_)
+        self.flatten = DepthwiseFlattenLayer(in_chans=self.c_, embed_dim=self.c_)
         self.m = nn.Sequential(*(Bottleneck_KAN_1D(self.c_, self.c_, shortcut, g, k=(k, k), e=1.0) for _ in range(n)))
 
     def forward(self, x):
@@ -1944,7 +1974,8 @@ class C2f_KAN(nn.Module):
         super().__init__()
         self.c = int(c2 * e)  # hidden channels
         self.cv1 = Conv(c1, 2 * self.c, 1, 1)
-        self.flatten = FlattenLayer(patch_size=7, stride=1, in_chans=self.c, embed_dim=self.c)
+        # self.flatten = FlattenLayer(patch_size=7, stride=1, in_chans=self.c, embed_dim=self.c)
+        self.flatten = DepthwiseFlattenLayer(in_chans=self.c, embed_dim=self.c)
         self.cv2 = Conv((2 + n) * self.c, c2, 1)  # optional act=FReLU(c2)
         self.m = nn.ModuleList(
             C3_KAN(self.c, self.c, 2, shortcut, g) for _ in range(n)

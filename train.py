@@ -5,7 +5,7 @@ from ultralytics import YOLO
 
 if __name__ == '__main__':
     # model = YOLO('/root/runs/detect/train6/weights/last.pt')
-    model = YOLO('/mnt/d/project/ultralytics-8.3.3/ultralytics/cfg/models/11/yolo11-KAN2.yaml')
+    model = YOLO('/mnt/d/project/ultralytics-8.3.3/ultralytics/cfg/models/11/yolo11.yaml')
     # model = YOLO('/mnt/d/project/ultralytics-8.3.3/runs/train/train/weights/last.pt       ')
 
     # model.load('yolov8n.pt') # loading pretrain weights
