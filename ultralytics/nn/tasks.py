@@ -34,6 +34,7 @@ from ultralytics.nn.modules import (
     C3k2,
     C3_KAN,
     C2f_KAN_1D,
+    C2f_KAN,
     KAN_Block,
     C3x,
     CBFuse,
@@ -64,6 +65,7 @@ from ultralytics.nn.modules import (
     WorldDetect,
     v10Detect,
 )
+from ultralytics.nn.modules.block import C2f_KAN
 from ultralytics.utils import DEFAULT_CFG_DICT, DEFAULT_CFG_KEYS, LOGGER, colorstr, emojis, yaml_load
 from ultralytics.utils.checks import check_requirements, check_suffix, check_yaml
 from ultralytics.utils.loss import (
@@ -986,6 +988,7 @@ def parse_model(d, ch, verbose=True):  # model_dict, input_channels(3)
             C3_KAN,
             C2f_KAN_1D,
             KAN_Block,
+            C2f_KAN,
             RepNCSPELAN4,
             ELAN1,
             ADown,

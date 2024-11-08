@@ -12,7 +12,7 @@ if __name__ == '__main__':
     model.train(data='/mnt/d/project/ultralytics-8.3.3/ultralytics/cfg/datasets/coco.yaml',
                 cache=False,
                 imgsz=640,
-                epochs=500,
+                epochs=600,
                 batch=64,
                 # close_mosaic=0,
                 workers=5,

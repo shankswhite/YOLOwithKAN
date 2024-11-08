@@ -831,23 +831,23 @@ def choose_kan(name, c1, c2, k):
     return kan
 
 
-class Bottleneck_KAN(Bottleneck):
-    def __init__(self, c1, c2, kan_mothed, shortcut=True, g=1, k=(3, 3), e=0.5):
-        super().__init__(c1, c2, shortcut, g, k, e)
-        c_ = int(c2 * e)  # hidden channels
-        self.cv1 = choose_kan(kan_mothed, c1, c_, k[0])
-        self.cv2 = choose_kan(kan_mothed, c_, c2, k[1])
-
-class C3_KAN(C3):
-    def __init__(self, c1, c2, n=1, kan_mothed=None, shortcut=False, g=1, e=0.5):
-        super().__init__(c1, c2, n, shortcut, g, e)
-        c_ = int(c2 * e)  # hidden channels
-        self.m = nn.Sequential(*(Bottleneck_KAN(c_, c_, kan_mothed, shortcut, g, k=(1, 3), e=1.0) for _ in range(n)))
-
-class C2f_KAN(C2f):
-    def __init__(self, c1, c2, n=1, kan_mothed=None, shortcut=False, g=1, e=0.5):
-        super().__init__(c1, c2, n, shortcut, g, e)
-        self.m = nn.ModuleList(Bottleneck_KAN(self.c, self.c, kan_mothed, shortcut, g, k=(3, 3), e=1.0) for _ in range(n))
+# class Bottleneck_KAN(Bottleneck):
+#     def __init__(self, c1, c2, kan_mothed, shortcut=True, g=1, k=(3, 3), e=0.5):
+#         super().__init__(c1, c2, shortcut, g, k, e)
+#         c_ = int(c2 * e)  # hidden channels
+#         self.cv1 = choose_kan(kan_mothed, c1, c_, k[0])
+#         self.cv2 = choose_kan(kan_mothed, c_, c2, k[1])
+#
+# class C3_KAN(C3):
+#     def __init__(self, c1, c2, n=1, kan_mothed=None, shortcut=False, g=1, e=0.5):
+#         super().__init__(c1, c2, n, shortcut, g, e)
+#         c_ = int(c2 * e)  # hidden channels
+#         self.m = nn.Sequential(*(Bottleneck_KAN(c_, c_, kan_mothed, shortcut, g, k=(1, 3), e=1.0) for _ in range(n)))
+#
+# class C2f_KAN(C2f):
+#     def __init__(self, c1, c2, n=1, kan_mothed=None, shortcut=False, g=1, e=0.5):
+#         super().__init__(c1, c2, n, shortcut, g, e)
+#         self.m = nn.ModuleList(Bottleneck_KAN(self.c, self.c, kan_mothed, shortcut, g, k=(3, 3), e=1.0) for _ in range(n))
 
 
 class ResNetBlock(nn.Module):
@@ -1899,3 +1899,67 @@ class KAN_Block(nn.Module):
         # Apply depthwise convolution, batch normalization, and activation
         x = self.act(self.bn(self.dwconv(x)))
         return x
+
+class Bottleneck_KAN(Bottleneck):
+    def __init__(self, c1, c2, kan_mothed, shortcut=True, g=1, k=(3, 3), e=0.5):
+        super().__init__(c1, c2, shortcut, g, k, e)
+        c_ = int(c2 * e)  # hidden channels
+        self.cv1 = choose_kan(kan_mothed, c1, c_, k[0])
+        self.cv2 = choose_kan(kan_mothed, c_, c2, k[1])
+
+
+class C3_KAN(nn.Module):
+    def __init__(self, c1, c2, n=1, shortcut=True, g=1, e=0.5, k=3):
+        """Initialize the CSP Bottleneck with given channels, number, shortcut, groups, and expansion values."""
+        super().__init__()
+        self.c_ = int(c2 * e)  # hidden channels
+        self.cv1 = Conv(c1, self.c_, 1, 1)
+        self.cv2 = Conv(c1, self.c_, 1, 1)
+        self.cv3 = Conv(2 * self.c_, c2, 1)  # optional act=FReLU(c2)
+        self.flatten = FlattenLayer(patch_size=7, stride=1, in_chans=self.c_, embed_dim=self.c_)
+        self.m = nn.Sequential(*(Bottleneck_KAN_1D(self.c_, self.c_, shortcut, g, k=(k, k), e=1.0) for _ in range(n)))
+
+    def forward(self, x):
+        """Forward pass through the CSP bottleneck with 2 convolutions."""
+
+        # Apply the first convolution and split the output into two parts
+        y1 = self.cv1(x)
+
+        # Flatten and reshape y1 to match the expected input size for self.m
+        flattened_y1, H, W = self.flatten(y1)  # Shape: [B, N, embed_dim]
+        reshaped_y1 = flattened_y1.transpose(1, 2).view(-1, self.c_, H, W)  # Shape: [B, c_, H, W]
+
+        # Pass the reshaped output through each Bottleneck_KAN_1D layer
+        y1_out = self.m(reshaped_y1)
+
+        # Apply the second convolution on the input directly
+        y2 = self.cv2(x)
+
+        # Concatenate y1_out and y2 along the channel dimension and pass through the final convolution
+        return self.cv3(torch.cat((y1_out, y2), 1))
+
+
+class C2f_KAN(nn.Module):
+    def __init__(self, c1, c2, n=1, shortcut=False, g=1, e=0.5):
+        super().__init__()
+        self.c = int(c2 * e)  # hidden channels
+        self.cv1 = Conv(c1, 2 * self.c, 1, 1)
+        self.flatten = FlattenLayer(patch_size=7, stride=1, in_chans=self.c, embed_dim=self.c)
+        self.cv2 = Conv((2 + n) * self.c, c2, 1)  # optional act=FReLU(c2)
+        self.m = nn.ModuleList(
+            C3_KAN(self.c, self.c, 2, shortcut, g) for _ in range(n)
+        )
+
+    def forward(self, x):
+        y = list(self.cv1(x).chunk(2, 1))  # 分成两部分
+
+        # 对 y[-1] 应用 flatten，但随后立即将其变回 [B, C, H, W]
+        flattened_y, H, W = self.flatten(y[-1])  # 形状：[B, N, embed_dim]
+        x = flattened_y.transpose(1, 2).view(-1, self.c, H, W)  # 形状：[B, C, H, W]
+
+        # 通过每个 Bottleneck_KAN_1D 层
+        for m in self.m:
+            x = m(x)  # x 形状：[B, c2, H, W]
+
+        y.append(x)
+        return self.cv2(torch.cat(y, 1))
