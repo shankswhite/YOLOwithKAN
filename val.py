@@ -14,6 +14,7 @@ if __name__ == '__main__':
               imgsz=640,
               batch=64,
               # iou=0.7,
+              # test
               # rect=False,
               save_json=True, # if you need to cal coco metrice
               project='runs/val',
