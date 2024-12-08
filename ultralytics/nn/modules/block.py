@@ -1796,7 +1796,7 @@ KAN with flatten
 
 
 
-class C2f_KAN_1D(nn.Module):
+class C2f_KAN_1D2(nn.Module):
     """Faster Implementation of CSP Bottleneck with KAN-enhanced convolutions."""
 
     def __init__(self, c1, c2, n=1, shortcut=False, g=1, e=0.5):
@@ -1804,17 +1804,18 @@ class C2f_KAN_1D(nn.Module):
         self.c = int(c2 * e)  # hidden channels
         self.cv1 = Conv(c1, 2 * self.c, 1, 1)
         self.flatten = FlattenLayer(patch_size=7, stride=1, in_chans=self.c, embed_dim=self.c)
+        # self.flatten = MaxPoolFlattenLayer(self.c, self.c)
         self.cv2 = Conv((2 + n) * self.c, c2, 1)  # optional act=FReLU(c2)
         self.m = nn.ModuleList(
             Bottleneck_KAN_1D(self.c, self.c, shortcut, g, k=(3, 3), e=1.0) for _ in range(n)
         )
 
     def forward(self, x):
-        y = list(self.cv1(x).chunk(2, 1))  # 分成两部分
+        y = list(self.cv1(x).chunk(2, 1))
 
-        # 对 y[-1] 应用 flatten，但随后立即将其变回 [B, C, H, W]
-        flattened_y, H, W = self.flatten(y[-1])  # 形状：[B, N, embed_dim]
-        x = flattened_y.transpose(1, 2).view(-1, self.c, H, W)  # 形状：[B, C, H, W]
+        flattened_y, H, W = self.flatten(y[-1])
+        x = flattened_y.transpose(1, 2).view(-1, self.c, H, W)
+        # x = self.flatten(y[-1])
 
         # 通过每个 Bottleneck_KAN_1D 层
         for m in self.m:
@@ -1852,19 +1853,41 @@ class DepthwiseFlattenLayer(nn.Module):
         return x, H, W
 
 
-class AvgPoolFlattenLayer(nn.Module):
-    def __init__(self, in_chans, embed_dim):
+class MaxPoolFlattenLayer2(nn.Module):
+    def __init__(self, in_chans, out_chans):
         super().__init__()
-        self.pool = nn.AdaptiveAvgPool2d((4, 4))  # 设定一个较小的分辨率，比如 4x4
-        self.fc = nn.Linear(in_chans * 4 * 4, embed_dim)
-        self.norm = nn.LayerNorm(embed_dim)
+        self.pool = nn.MaxPool2d(kernel_size=3, stride=1, padding=1)  # Keeps spatial dimensions the same
+        self.conv = nn.Conv2d(in_chans, out_chans, kernel_size=1)
+        self.norm = nn.BatchNorm2d(out_chans)
 
     def forward(self, x):
-        x = self.pool(x)  # [B, in_chans, 4, 4]
-        x = x.flatten(1)  # [B, in_chans * 4 * 4]
-        x = self.fc(x)  # [B, embed_dim]
+        x = self.pool(x)  # [B, in_chans, H, W]
+        x = self.conv(x)  # [B, out_chans, H, W]
         x = self.norm(x)
-        return x
+        return x  # [B, out_chans, H, W]
+
+
+class MaxPoolFlattenLayer(nn.Module):
+    def __init__(self, in_chans, out_chans):
+        super().__init__()
+        self.pool = nn.MaxPool2d(kernel_size=3, stride=1, padding=1)  # Keeps spatial dimensions the same
+        self.conv = nn.Conv2d(in_chans, out_chans, kernel_size=1)
+        self.norm = nn.BatchNorm2d(out_chans)
+
+    def forward(self, x):
+        # Apply pooling, convolution, and normalization
+        x = self.pool(x)  # [B, in_chans, H, W]
+        x = self.conv(x)  # [B, out_chans, H, W]
+        x = self.norm(x)  # [B, out_chans, H, W]
+
+        # Get spatial dimensions for later reshaping
+        B, C, H, W = x.shape
+
+        # Flatten spatial dimensions and transpose to match KANLayer input
+        x = x.flatten(2).transpose(1, 2)  # [B, N, embed_dim], where N = H * W
+
+        return x, H, W
+
 
 
 class FlattenLayer(nn.Module):
@@ -1897,7 +1920,69 @@ class FlattenLayer(nn.Module):
         x = self.norm(x)
         return x, H, W
 
+
+class C2f_KAN_1D(nn.Module):
+    """Faster Implementation of CSP Bottleneck with KAN-enhanced convolutions."""
+
+    def __init__(self, c1, c2, n=1, shortcut=False, g=1, e=0.5):
+        super().__init__()
+        self.c = int(c2 * e)  # hidden channels
+        self.cv1 = Conv(c1, 2 * self.c, 1, 1)  # First convolutional layer
+        self.cv2 = Conv((2 + n) * self.c, c2, 1)  # Final convolutional layer
+        self.m = nn.ModuleList(
+            Bottleneck_KAN_1D(self.c, self.c, shortcut, g, k=(3, 3), e=1.0) for _ in range(n)
+        )
+
+    def forward(self, x):
+        # Split the feature map into two parts
+        y = list(self.cv1(x).chunk(2, 1))  # Split into [B, self.c, H, W] and [B, self.c, H, W]
+
+        # Process the second part through Bottleneck_KAN_1D layers
+        x = y[-1]
+        for m in self.m:
+            x = m(x)
+
+        # Concatenate and apply the final convolution
+        y.append(x)
+        return self.cv2(torch.cat(y, 1))
+
 class KAN_Block(nn.Module):
+    """KAN Block with KANLayer, DWConv, BatchNorm, and customizable activation and convolution parameters."""
+
+    def __init__(self, c1, c2, k=3, s=1, p=None, g=1, d=1, act=True, patch_size=1, stride=1):
+        super(KAN_Block, self).__init__()
+        # FlattenLayer to preprocess input for KANLayer
+        # self.flatten = FlattenLayer(patch_size=patch_size, stride=stride, in_chans=c1, embed_dim=c1)
+        self.flatten = DepthwiseFlattenLayer(c1, c2)
+
+        # KANLayer: c1 to c2 transformation
+        self.kanlayer = KAN([c1, c2], grid_size=4, spline_order=3, scale_noise=0.1)
+
+        # Depthwise Convolution with adjustable parameters
+        self.dwconv = nn.Conv2d(c2, c2, kernel_size=k, stride=s, padding=autopad(k, p, d), groups=g, dilation=d)
+
+        # Batch Normalization
+        self.bn = nn.BatchNorm2d(c2)
+
+        # Activation Function
+        self.act = nn.SiLU() if act is True else act if isinstance(act, nn.Module) else nn.Identity()
+
+    def forward(self, x):
+        # x is in the shape [B, C, H, W]
+
+        # FlattenLayer for KAN layer processing
+        flattened_x, H, W = self.flatten(x)  # Shape: [B, N, embed_dim], N = H * W
+        x = self.kanlayer(flattened_x)  # Shape after KAN: [B, N, c2]
+
+        # Reshape back to [B, c2, H, W]
+        x = x.transpose(1, 2).view(-1, x.shape[-1], H, W)  # Shape: [B, c2, H, W]
+
+        # Apply depthwise convolution, batch normalization, and activation
+        x = self.act(self.bn(self.dwconv(x)))
+        return x
+
+
+class KAN_Block2(nn.Module):
     """KAN Block with KANLayer, DWConv, BatchNorm, and customizable activation and convolution parameters."""
 
     def __init__(self, c1, c2, k=3, s=1, p=None, g=1, d=1, act=True):
@@ -1945,8 +2030,8 @@ class C3_KAN(nn.Module):
         self.cv1 = Conv(c1, self.c_, 1, 1)
         self.cv2 = Conv(c1, self.c_, 1, 1)
         self.cv3 = Conv(2 * self.c_, c2, 1)  # optional act=FReLU(c2)
-        # self.flatten = FlattenLayer(patch_size=7, stride=1, in_chans=self.c_, embed_dim=self.c_)
-        self.flatten = DepthwiseFlattenLayer(in_chans=self.c_, embed_dim=self.c_)
+        self.flatten = FlattenLayer(patch_size=5, stride=1, in_chans=self.c_, embed_dim=self.c_)
+        # self.flatten = DepthwiseFlattenLayer(in_chans=self.c_, embed_dim=self.c_)
         self.m = nn.Sequential(*(Bottleneck_KAN_1D(self.c_, self.c_, shortcut, g, k=(k, k), e=1.0) for _ in range(n)))
 
     def forward(self, x):
@@ -1974,8 +2059,8 @@ class C2f_KAN(nn.Module):
         super().__init__()
         self.c = int(c2 * e)  # hidden channels
         self.cv1 = Conv(c1, 2 * self.c, 1, 1)
-        # self.flatten = FlattenLayer(patch_size=7, stride=1, in_chans=self.c, embed_dim=self.c)
-        self.flatten = DepthwiseFlattenLayer(in_chans=self.c, embed_dim=self.c)
+        self.flatten = FlattenLayer(patch_size=5, stride=1, in_chans=self.c, embed_dim=self.c)
+        # self.flatten = DepthwiseFlattenLayer(in_chans=self.c, embed_dim=self.c)
         self.cv2 = Conv((2 + n) * self.c, c2, 1)  # optional act=FReLU(c2)
         self.m = nn.ModuleList(
             C3_KAN(self.c, self.c, 2, shortcut, g) for _ in range(n)

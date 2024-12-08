@@ -128,7 +128,7 @@ def increment_path(path, exist_ok=False, sep="", mkdir=False):
         >>> path = Path("runs/exp")
         >>> new_path = increment_path(path)
         >>> print(new_path)
-        runs/exp2
+        runs/11-official
 
         Increment a file path:
         >>> path = Path("runs/exp/results.txt")
@@ -178,7 +178,7 @@ def file_size(path):
 
 
 def get_latest_run(search_dir="."):
-    """Returns the path to the most recent 'last.pt' file in the specified directory for resuming training."""
+    """Returns the path to the most recent '11-1-7.pt' file in the specified directory for resuming training."""
     last_list = glob.glob(f"{search_dir}/**/last*.pt", recursive=True)
     return max(last_list, key=os.path.getctime) if last_list else ""
 

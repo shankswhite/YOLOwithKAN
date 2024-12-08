@@ -13,9 +13,9 @@ Usage:
 
     yolo mode=train data=/mnt/d/project/ultralytics-8.3.3/ultralytics/cfg/datasets/coco.yaml model=/mnt/d/project/ultralytics-8.3.3/ultralytics/cfg/models/11/yolo11.yaml imgsz=640 epochs=500 batch=64 device=0,1 workers=7 pretrained=False plots=true
 
-    yolo mode=train data=/mnt/d/project/ultralytics-8.3.3/ultralytics/cfg/datasets/coco.yaml model=/root/runs/detect/train6/weights/last.pt imgsz=640 epochs=500 batch=64 device=0,1 workers=4 pretrained=False plots=true --resume
+    yolo mode=train data=/mnt/d/project/ultralytics-8.3.3/ultralytics/cfg/datasets/coco.yaml model=/root/runs/detect/train6/weights/11-1-7.pt imgsz=640 epochs=500 batch=64 device=0,1 workers=4 pretrained=False plots=true --resume
 
-     yolo mode=train data=/mnt/d/project/ultralytics-8.3.3/ultralytics/cfg/datasets/coco.yaml model=/root/runs/detect/train6/weights/last.pt imgsz=640 epochs=500 batch=64 device=0,1 workers=7 pretrained=False plots=true --resume
+     yolo mode=train data=/mnt/d/project/ultralytics-8.3.3/ultralytics/cfg/datasets/coco.yaml model=/root/runs/detect/train6/weights/11-1-7.pt imgsz=640 epochs=500 batch=64 device=0,1 workers=7 pretrained=False plots=true --resume
 """
 
 
@@ -126,7 +126,7 @@ class BaseTrainer:
             self.wdir.mkdir(parents=True, exist_ok=True)  # make dir
             self.args.save_dir = str(self.save_dir)
             yaml_save(self.save_dir / "args.yaml", vars(self.args))  # save run args
-        self.last, self.best = self.wdir / "last.pt", self.wdir / "best.pt"  # checkpoint paths
+        self.last, self.best = self.wdir / "11-1-7.pt", self.wdir / "best.pt"  # checkpoint paths
         self.save_period = self.args.save_period
 
         self.batch_size = self.args.batch
@@ -545,7 +545,7 @@ class BaseTrainer:
         serialized_ckpt = buffer.getvalue()  # get the serialized content to save
 
         # Save checkpoints
-        self.last.write_bytes(serialized_ckpt)  # save last.pt
+        self.last.write_bytes(serialized_ckpt)  # save 11-1-7.pt
         if self.best_fitness == self.fitness:
             self.best.write_bytes(serialized_ckpt)  # save best.pt
         if (self.save_period > 0) and (self.epoch % self.save_period == 0):
@@ -688,7 +688,7 @@ class BaseTrainer:
                 if f is self.last:
                     ckpt = strip_optimizer(f)
                 elif f is self.best:
-                    k = "train_results"  # update best.pt train_metrics from last.pt
+                    k = "train_results"  # update best.pt train_metrics from 11-1-7.pt
                     strip_optimizer(f, updates={k: ckpt[k]} if k in ckpt else None)
                     LOGGER.info(f"\nValidating {f}...")
                     self.validator.args.plots = self.args.plots
@@ -724,7 +724,7 @@ class BaseTrainer:
             except Exception as e:
                 raise FileNotFoundError(
                     "Resume checkpoint not found. Please pass a valid checkpoint to resume from, "
-                    "i.e. 'yolo train resume model=path/to/last.pt'"
+                    "i.e. 'yolo train resume model=path/to/11-1-7.pt'"
                 ) from e
         self.resume = resume
 

@@ -124,7 +124,7 @@ Ensemble created with ['yolov5x.pt', 'yolov5l6.pt']
 
 image 1/2 /content/yolov5/data/images/bus.jpg: 640x512 4 persons, 1 bus, 1 tie, Done. (0.063s)
 image 2/2 /content/yolov5/data/images/zidane.jpg: 384x640 3 persons, 2 ties, Done. (0.056s)
-Results saved to runs/detect/exp2
+Results saved to runs/detect/11-official
 Done. (0.223s)
 ```
 
